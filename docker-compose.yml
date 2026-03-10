@@ -19,7 +19,8 @@ services:
     ports:
       - 127.0.0.1:3030:3030
     environment: &langfuse-worker-env
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      # [WNC] Default URL matches the new 3300 UI port to avoid conflicts with Gitea.
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3300}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres} # CHANGEME
       SALT: ${SALT:-mysalt} # CHANGEME
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000} # CHANGEME: generate via `openssl rand -hex 32`
@@ -35,28 +36,32 @@ services:
       LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
       LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID:-minio}
       LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
-      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: ${LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT:-http://minio:9000}
+      # [WNC] Use the internal Langfuse MinIO hostname to avoid clashes with RAGFlow's MinIO.
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: ${LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT:-http://langfuse-minio:9000}
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: ${LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE:-true}
       LANGFUSE_S3_EVENT_UPLOAD_PREFIX: ${LANGFUSE_S3_EVENT_UPLOAD_PREFIX:-events/}
       LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_MEDIA_UPLOAD_BUCKET:-langfuse}
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: ${LANGFUSE_S3_MEDIA_UPLOAD_REGION:-auto}
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID:-minio}
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9090}
+      # [WNC] Point to the Langfuse MinIO service so uploads work from inside the container.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://langfuse-minio:9000}
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: ${LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE:-true}
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: ${LANGFUSE_S3_MEDIA_UPLOAD_PREFIX:-media/}
       LANGFUSE_S3_BATCH_EXPORT_ENABLED: ${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}
       LANGFUSE_S3_BATCH_EXPORT_BUCKET: ${LANGFUSE_S3_BATCH_EXPORT_BUCKET:-langfuse}
       LANGFUSE_S3_BATCH_EXPORT_PREFIX: ${LANGFUSE_S3_BATCH_EXPORT_PREFIX:-exports/}
       LANGFUSE_S3_BATCH_EXPORT_REGION: ${LANGFUSE_S3_BATCH_EXPORT_REGION:-auto}
-      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: ${LANGFUSE_S3_BATCH_EXPORT_ENDPOINT:-http://minio:9000}
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: ${LANGFUSE_S3_BATCH_EXPORT_ENDPOINT:-http://langfuse-minio:9000}
+      # [WNC] Expose the public download URL via the host mapping.
       LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: ${LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT:-http://localhost:9090}
       LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID:-minio}
       LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
       LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: ${LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:-true}
       LANGFUSE_INGESTION_QUEUE_DELAY_MS: ${LANGFUSE_INGESTION_QUEUE_DELAY_MS:-}
       LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS: ${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-}
-      REDIS_HOST: ${REDIS_HOST:-redis}
+      # [WNC] Pin Redis hostname to avoid clashing with RAGFlow's redis service on the shared network.
+      REDIS_HOST: ${REDIS_HOST:-langfuse-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_AUTH: ${REDIS_AUTH:-myredissecret} # CHANGEME
       REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-false}
@@ -65,15 +70,24 @@ services:
       REDIS_TLS_KEY: ${REDIS_TLS_KEY:-/certs/redis.key}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
+    networks:
+      # [WNC] Attach services to the custom subnet to bypass the host's 172.17/16 route.
+      - langfuse_net
 
   langfuse-web:
     image: docker.io/langfuse/langfuse:3
+    container_name: langfuse-web
     restart: always
     depends_on: *langfuse-depends-on
     ports:
-      - 3000:3000
+      # [WNC] Expose the UI on 3300 (host and container) to avoid the Gitea listener on 3000.
+      - 3300:3300
     environment:
       <<: *langfuse-worker-env
+      # [WNC] Instruct Next.js inside the container to listen on port 3300.
+      PORT: ${PORT:-3300}
+      # [WNC] Force Next.js to bind on all interfaces so host + other networks can reach it.
+      HOSTNAME: ${HOSTNAME:-0.0.0.0}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
@@ -84,6 +98,10 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    networks:
+      - langfuse_net
+      # [WNC] Attach to RAGFlow network so the backend can reach it via stable hostname.
+      - docker_ragflow
 
   clickhouse:
     image: docker.io/clickhouse/clickhouse-server
@@ -105,9 +123,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 1s
+    networks:
+      - langfuse_net
 
   minio:
     image: cgr.dev/chainguard/minio
+    container_name: langfuse-minio
     restart: always
     entrypoint: sh
     # create the 'langfuse' bucket before starting the service
@@ -126,9 +147,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 1s
+    networks:
+      langfuse_net:
+        aliases:
+          # [WNC] Advertise a unique hostname so other stacks don't resolve RAGFlow's MinIO instead.
+          - langfuse-minio
 
   redis:
     image: docker.io/redis:7
+    container_name: langfuse-redis
     restart: always
     # CHANGEME: row below to secure redis password
     command: >
@@ -143,6 +170,11 @@ services:
       interval: 3s
       timeout: 10s
       retries: 10
+    networks:
+      langfuse_net:
+        aliases:
+          # [WNC] Provide a stable hostname so other networks don't confuse this with RAGFlow's redis.
+          - langfuse-redis
 
   postgres:
     image: docker.io/postgres:${POSTGRES_VERSION:-17}
@@ -162,6 +194,8 @@ services:
       - 127.0.0.1:5432:5432
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
+    networks:
+      - langfuse_net
 
 volumes:
   langfuse_postgres_data:
@@ -174,3 +208,14 @@ volumes:
     driver: local
   langfuse_redis_data:
     driver: local
+
+networks:
+  langfuse_net:
+    driver: bridge
+    ipam:
+      config:
+        # [WNC] Reserve a dedicated 10.202.0.0/16 pool so Docker avoids the conflicting 172.17/16 route.
+        - subnet: 10.202.0.0/16
+  docker_ragflow:
+    # [WNC] Reuse the external network created by the RAGFlow compose stack.
+    external: true
