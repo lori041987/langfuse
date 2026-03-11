@@ -26,7 +26,8 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000} # CHANGEME: generate via `openssl rand -hex 32`
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
-      CLICKHOUSE_MIGRATION_URL: ${CLICKHOUSE_MIGRATION_URL:-clickhouse://clickhouse:9000}
+      # [WNC] Use port 9500 to avoid conflict with RAGFlow's MinIO on port 9000
+      CLICKHOUSE_MIGRATION_URL: ${CLICKHOUSE_MIGRATION_URL:-clickhouse://clickhouse:9500}
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse} # CHANGEME
@@ -62,7 +63,8 @@ services:
       LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS: ${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-}
       # [WNC] Pin Redis hostname to avoid clashing with RAGFlow's redis service on the shared network.
       REDIS_HOST: ${REDIS_HOST:-langfuse-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
+      # [WNC] Use port 6385 to avoid conflict with RAGFlow's Redis on port 6379
+      REDIS_PORT: ${REDIS_PORT:-6385}
       REDIS_AUTH: ${REDIS_AUTH:-myredissecret} # CHANGEME
       REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-false}
       REDIS_TLS_CA: ${REDIS_TLS_CA:-/certs/ca.crt}
@@ -114,9 +116,12 @@ services:
     volumes:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
+      # [WNC] ClickHouse server inside the container defaults to listening on port 9000, mount custom config to change it to 9500 to avoid conflict with RAGFlow's MinIO
+      - ./clickhouse-config/custom-config.xml:/etc/clickhouse-server/config.d/custom-config.xml
     ports:
       - 127.0.0.1:8123:8123
-      - 127.0.0.1:9000:9000
+      # [WNC] Port 9500 instead of 9000 to avoid conflict with RAGFlow's MinIO
+      - 127.0.0.1:9500:9500
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 5s
@@ -158,15 +163,19 @@ services:
     container_name: langfuse-redis
     restart: always
     # CHANGEME: row below to secure redis password
+    # [WNC] Listen on port 6385 to avoid conflict with RAGFlow's Redis
     command: >
+      --port 6385
       --requirepass ${REDIS_AUTH:-myredissecret}
       --maxmemory-policy noeviction
     ports:
-      - 127.0.0.1:6379:6379
+      # [WNC] Port 6385 instead of 6379 to avoid conflict with RAGFlow's Redis
+      - 127.0.0.1:6385:6385
     volumes:
       - langfuse_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # [WNC] Specify port 6385 because redis-cli binary inside the container defaults to 6379
+      test: ["CMD", "redis-cli", "-p", "6385", "ping"]
       interval: 3s
       timeout: 10s
       retries: 10

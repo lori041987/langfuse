@@ -1,0 +1,4 @@
+<clickhouse>
+    <!-- [WNC] Configure ClickHouse to listen on port 9500 instead of default 9000 to avoid conflict with RAGFlow's MinIO -->
+    <tcp_port>9500</tcp_port>
+</clickhouse>
